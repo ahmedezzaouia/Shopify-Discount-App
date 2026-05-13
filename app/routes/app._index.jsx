@@ -1,331 +1,300 @@
-import { useEffect } from "react";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+/* eslint-disable react/prop-types */
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate, useLoaderData, useFetcher } from "react-router";
+import {
+  ActionList,
+  Badge,
+  Banner,
+  BlockStack,
+  Box,
+  Button,
+  Card,
+  IndexTable,
+  InlineStack,
+  Link,
+  Page,
+  Popover,
+  Spinner,
+  Text,
+  useBreakpoints,
+} from "@shopify/polaris";
+import { MenuHorizontalIcon, PlusIcon } from "@shopify/polaris-icons";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import {
+  listDiscounts,
+  saveDiscount,
+  deleteDiscount,
+  toggleDiscountStatus,
+  duplicateDiscount,
+  upsertShopifyDiscountPublic,
+} from "../data/discounts.server";
+import { PillTabs } from "../components/PillTabs";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const discounts = await listDiscounts(admin);
+
+  await Promise.all(
+    discounts.map((d) => {
+      // New discount with no Shopify Discount yet → do a full save to create it.
+      if (!d.shopify_discount_id) return saveDiscount(admin, d, shop);
+      // Existing discount → re-push fresh rule JSON + live fetch_url metafield
+      // so the Function always has the latest data via fetch target.
+      return upsertShopifyDiscountPublic(admin, d, shop);
+    }),
+  );
+
+  // Re-fetch so shopify_discount_id is populated for any newly created ones.
+  return { discounts: await listDiscounts(admin) };
+};
+
+export const action = async ({ request }) => {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+  const id = formData.get("id");
+
+  if (intent === "delete") await deleteDiscount(admin, id);
+  if (intent === "toggle") await toggleDiscountStatus(admin, id, shop);
+  if (intent === "duplicate") await duplicateDiscount(admin, id);
 
   return null;
 };
 
-export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-            demoInfo: metafield(namespace: "$app", key: "demo_info") {
-              jsonValue
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-          metafields: [
-            {
-              namespace: "$app",
-              key: "demo_info",
-              value: "Created by React Router Template",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
-  const metaobjectResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpsertMetaobject($handle: MetaobjectHandleInput!, $metaobject: MetaobjectUpsertInput!) {
-      metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
-        metaobject {
-          id
-          handle
-          title: field(key: "title") {
-            jsonValue
-          }
-          description: field(key: "description") {
-            jsonValue
-          }
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
-    {
-      variables: {
-        handle: {
-          type: "$app:example",
-          handle: "demo-entry",
-        },
-        metaobject: {
-          fields: [
-            { key: "title", value: "Demo Entry" },
-            {
-              key: "description",
-              value:
-                "This metaobject was created by the Shopify app template to demonstrate the metaobject API.",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const metaobjectResponseJson = await metaobjectResponse.json();
+const TABS = [
+  { id: "all", content: "All", status: null },
+  { id: "active", content: "Active", status: "active" },
+  { id: "inactive", content: "Inactive", status: "inactive" },
+];
 
-  return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-    metaobject: metaobjectResponseJson.data.metaobjectUpsert.metaobject,
-  };
-};
+function buildRuleText(discount) {
+  const buyName = discount.buy_products?.[0]?.title ?? "product";
+  const getName = discount.get_products?.[0]?.title ?? "product";
+  const valueLabel =
+    discount.discount_value_type === "percentage"
+      ? `${discount.discount_value ?? "?"}% off`
+      : discount.discount_value_type === "fixed"
+        ? `$${discount.discount_value ?? "?"} off`
+        : "free";
+  return `Buy ${discount.buy_qty} × ${buyName} → Get ${discount.get_qty} × ${getName} ${valueLabel}`;
+}
 
-export default function Index() {
+function RowMenu({ discount }) {
+  const navigate = useNavigate();
   const fetcher = useFetcher();
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
+  const [open, setOpen] = useState(false);
+  const loading = fetcher.state !== "idle";
 
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
-    }
-  }, [fetcher.data?.product?.id, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  const submit = useCallback(
+    (intent) => {
+      setOpen(false);
+      fetcher.submit({ intent, id: discount.id }, { method: "post" });
+    },
+    [fetcher, discount.id],
+  );
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
-      </s-button>
-
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references. Includes a product{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metafields"
-            target="_blank"
-          >
-            metafield
-          </s-link>{" "}
-          and{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metaobjects"
-            target="_blank"
-          >
-            metaobject
-          </s-link>
-          .
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>metaobjectUpsert mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>
-                    {JSON.stringify(fetcher.data.metaobject, null, 2)}
-                  </code>
-                </pre>
-              </s-box>
-            </s-stack>
-          </s-section>
-        )}
-      </s-section>
-
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Custom data: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data"
-            target="_blank"
-          >
-            Metafields &amp; metaobjects
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
-      </s-section>
-
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
-      </s-section>
-    </s-page>
+    <Popover
+      active={open}
+      activator={
+        loading ? (
+          <Box paddingInline="200">
+            <Spinner size="small" />
+          </Box>
+        ) : (
+          <Button
+            variant="tertiary"
+            icon={MenuHorizontalIcon}
+            accessibilityLabel={`Actions for ${discount.name}`}
+            onClick={() => setOpen((v) => !v)}
+            disabled={loading}
+          />
+        )
+      }
+      onClose={() => setOpen(false)}
+      autofocusTarget="first-node"
+      preferredAlignment="right"
+    >
+      <ActionList
+        actionRole="menuitem"
+        items={[
+          {
+            content: "Edit",
+            disabled: loading,
+            onAction: () => {
+              setOpen(false);
+              navigate(`/app/discounts/${encodeURIComponent(discount.id)}`);
+            },
+          },
+          {
+            content: "Duplicate",
+            disabled: loading,
+            onAction: () => submit("duplicate"),
+          },
+          {
+            content: discount.status === "active" ? "Deactivate" : "Activate",
+            disabled: loading,
+            onAction: () => submit("toggle"),
+          },
+          {
+            content: "Delete",
+            destructive: true,
+            disabled: loading,
+            onAction: () => submit("delete"),
+          },
+        ]}
+      />
+    </Popover>
   );
 }
 
-export const headers = (headersArgs) => {
-  return boundary.headers(headersArgs);
-};
+export default function Index() {
+  const { discounts } = useLoaderData();
+  const navigate = useNavigate();
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  const counts = useMemo(
+    () => ({
+      all: discounts.length,
+      active: discounts.filter((d) => d.status === "active").length,
+      inactive: discounts.filter((d) => d.status === "inactive").length,
+    }),
+    [discounts],
+  );
+
+  const tabs = TABS.map((tab) => ({
+    id: tab.id,
+    content: tab.content,
+    badge: String(counts[tab.id]),
+    status: tab.status,
+  }));
+
+  const currentStatus = TABS[selectedTab].status;
+  const filtered = useMemo(
+    () =>
+      currentStatus === null
+        ? discounts
+        : discounts.filter((d) => d.status === currentStatus),
+    [discounts, currentStatus],
+  );
+
+  const handleNewDiscount = useCallback(
+    () => navigate("/app/discounts/new"),
+    [navigate],
+  );
+
+  const { mdDown } = useBreakpoints();
+
+  const rowMarkup = filtered.map((discount, index) => (
+    <IndexTable.Row id={discount.id} key={discount.id} position={index}>
+      <IndexTable.Cell>
+        <Text as="span" fontWeight="semibold">
+          {discount.name || "Untitled"}
+        </Text>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <Box maxWidth={mdDown ? "240px" : "420px"}>
+          <Text as="span" truncate>
+            {buildRuleText(discount)}
+          </Text>
+        </Box>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <Badge tone={discount.status === "active" ? "success" : undefined}>
+          {discount.status === "active" ? "Active" : "Inactive"}
+        </Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <InlineStack align="end">
+          <RowMenu discount={discount} />
+        </InlineStack>
+      </IndexTable.Cell>
+    </IndexTable.Row>
+  ));
+
+  return (
+    <Page
+      title="Buy X, Get Y discounts"
+      primaryAction={{
+        content: "New discount",
+        icon: PlusIcon,
+        onAction: handleNewDiscount,
+      }}
+    >
+      <BlockStack gap="400">
+        {!bannerDismissed && (
+          <Banner
+            tone="info"
+            title="Set up a Buy X, Get Y offer in under a minute"
+            action={{
+              content: "New discount",
+              icon: PlusIcon,
+              onAction: handleNewDiscount,
+            }}
+            onDismiss={() => setBannerDismissed(true)}
+          >
+            <p>
+              Pick what customers buy, pick what they get, set the price.
+              That&apos;s it.
+            </p>
+          </Banner>
+        )}
+        <Card padding="0">
+          <PillTabs
+            tabs={tabs}
+            selected={selectedTab}
+            onSelect={setSelectedTab}
+          />
+          <IndexTable
+            itemCount={filtered.length}
+            selectable={false}
+            headings={[
+              { title: "Name" },
+              { title: "Rule" },
+              { title: "Status" },
+              { title: "", hidden: true },
+            ]}
+            emptyState={
+              <Box padding="1600">
+                <BlockStack gap="200" inlineAlign="center">
+                  <Text as="p" tone="subdued">
+                    No discounts yet.{" "}
+                    <Link onClick={handleNewDiscount} removeUnderline>
+                      Create your first discount
+                    </Link>
+                    .
+                  </Text>
+                </BlockStack>
+              </Box>
+            }
+          >
+            {rowMarkup}
+          </IndexTable>
+          <Box
+            padding="400"
+            borderBlockStartWidth="025"
+            borderColor="border"
+          >
+            <InlineStack align="center">
+              <Text as="span" tone="subdued">
+                Learn more about{" "}
+                <Link
+                  url="https://help.shopify.com/manual/discounts"
+                  target="_blank"
+                >
+                  Shopify discounts
+                </Link>
+              </Text>
+            </InlineStack>
+          </Box>
+        </Card>
+      </BlockStack>
+    </Page>
+  );
+}
+
+export const headers = (headersArgs) => boundary.headers(headersArgs);

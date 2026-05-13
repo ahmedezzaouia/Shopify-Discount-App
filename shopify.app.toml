@@ -7,7 +7,6 @@ embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-07"
@@ -20,33 +19,82 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  [[webhooks.subscriptions]]
+  topics = [ "metaobjects/update" ]
+  uri = "/webhooks/metaobjects/update"
+  filter = "type:app--16966a0dc4113dc067dbb3ed282002d1--discount"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions"
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_discounts"
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
 
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
+[metaobjects.app.discount]
+name = "Discount"
+description = "Buy X Get Y discount stored by Deal Forge"
 
-  [product.metafields.app.demo_info.access]
+  [metaobjects.app.discount.access]
   admin = "merchant_read_write"
 
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
+[metaobjects.app.discount.fields.name]
+name = "Name"
 type = "single_line_text_field"
 required = true
 
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+[metaobjects.app.discount.fields.discount_type]
+name = "Type"
+type = "single_line_text_field"
+validations.choices = ["automatic", "code"]
+
+[metaobjects.app.discount.fields.status]
+name = "Status"
+type = "single_line_text_field"
+validations.choices = ["active", "inactive"]
+
+[metaobjects.app.discount.fields.buy_qty]
+name = "Buy quantity"
+type = "number_integer"
+
+[metaobjects.app.discount.fields.get_qty]
+name = "Get quantity"
+type = "number_integer"
+
+[metaobjects.app.discount.fields.buy_products]
+name = "Buy products"
+type = "list.product_reference"
+
+[metaobjects.app.discount.fields.get_products]
+name = "Get products"
+type = "list.product_reference"
+
+[metaobjects.app.discount.fields.discount_value_type]
+name = "Discount value type"
+type = "single_line_text_field"
+validations.choices = ["free", "percentage", "fixed"]
+
+[metaobjects.app.discount.fields.discount_value]
+name = "Discount value"
+type = "number_decimal"
+
+[metaobjects.app.discount.fields.auto_add]
+name = "Auto add"
+type = "boolean"
+
+[metaobjects.app.discount.fields.start_date]
+name = "Start date"
+type = "date"
+
+[metaobjects.app.discount.fields.has_end]
+name = "Has end date"
+type = "boolean"
+
+[metaobjects.app.discount.fields.end_date]
+name = "End date"
+type = "date"
+
+[metaobjects.app.discount.fields.shopify_discount_id]
+name = "Linked Shopify discount"
+description = "GID of the Shopify Discount that runs the Function for this rule"
+type = "single_line_text_field"
