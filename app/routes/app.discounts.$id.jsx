@@ -30,6 +30,7 @@ import {
   saveDiscount,
   toggleDiscountStatus,
   upsertShopifyDiscountPublic,
+  syncCartAutoAddShopMetafield,
 } from "../data/discounts.server";
 
 export const loader = async ({ request, params }) => {
@@ -47,6 +48,8 @@ export const loader = async ({ request, params }) => {
   if (discount?.shopify_discount_id) {
     await upsertShopifyDiscountPublic(admin, discount, shop);
   }
+
+  await syncCartAutoAddShopMetafield(admin);
 
   return { discount };
 };
@@ -613,7 +616,6 @@ export default function DiscountForm() {
             >
               <Checkbox
                 label="Automatically add this product to cart"
-                helpText="The item is added to the cart automatically when the cart qualifies."
                 checked={autoAdd}
                 onChange={setAutoAdd}
               />

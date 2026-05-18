@@ -1,0 +1,10 @@
+# Theme app extension: injects auto-add rules JSON and storefront script.
+# https://shopify.dev/docs/apps/build/online-store/theme-app-extensions
+
+api_version = "2026-04"
+
+[[extensions]]
+name = "cart-auto-add-storefront"
+handle = "cart-auto-add-storefront"
+type = "theme"
+uid = "c2d4e6f8-90ab-cdef-1234-567890abcdef"

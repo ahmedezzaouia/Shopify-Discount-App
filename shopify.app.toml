@@ -26,10 +26,24 @@ api_version = "2026-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_discounts"
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_discounts,write_app_proxy"
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
+
+# Storefront fetches rules at /apps/customer-discount/cart-auto-add-rules (same origin).
+[app_proxy]
+url = "https://example.com/api/proxy"
+prefix = "apps"
+subpath = "customer-discount"
+
+# JSON array of auto-add rules for the Theme App Extension (Cart Ajax).
+# Storefront must read this in theme Liquid; without public_read, rules stay blank.
+[shop.metafields.app.cart_auto_add_rules]
+name = "Cart auto-add rules"
+type = "json"
+access.admin = "merchant_read_write"
+access.storefront = "public_read"
 
 [metaobjects.app.discount]
 name = "Discount"

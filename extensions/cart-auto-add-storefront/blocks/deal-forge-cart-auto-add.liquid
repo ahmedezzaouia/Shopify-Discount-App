@@ -1,0 +1,38 @@
+{%- comment -%}
+  Rules JSON (shop metafield) + app-proxy path when Liquid has no storefront access.
+{%- endcomment -%}
+{%- liquid
+  assign df_client_id = "16966a0dc4113dc067dbb3ed282002d1"
+  assign df_ns = "app--" | append: df_client_id
+  assign df_mf = shop.metafields[df_ns]["cart_auto_add_rules"]
+  if df_mf == blank
+    assign df_mf = shop.metafields.app.cart_auto_add_rules
+  endif
+-%}
+<script
+  id="deal-forge-cart-auto-add-rules"
+  type="application/json"
+>
+{%- if df_mf and df_mf.value != blank -%}
+{{- df_mf.value | json -}}
+{%- else -%}
+[]
+{%- endif -%}
+</script>
+<script
+  id="deal-forge-cart-auto-add-fetch"
+  type="application/json"
+>
+{{- "/apps/customer-discount/cart-auto-add-rules" | json -}}
+</script>
+{%- if request.query_string contains "df_debug=1" -%}
+<!-- df-caa mf_p={% if df_mf != blank %}1{% else %}0{% endif %} -->
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Deal Forge auto-add",
+  "target": "body",
+  "javascript": "deal-forge-cart-auto-add.js"
+}
+{% endschema %}

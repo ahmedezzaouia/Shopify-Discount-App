@@ -519,6 +519,162 @@ async function deleteShopifyDiscount(admin, discount) {
   }
 }
 
+const SHOP_ID_QUERY = `#graphql
+  query ShopIdForMetafield {
+    shop {
+      id
+    }
+  }
+`;
+
+const PRODUCT_FIRST_VARIANT_QUERY = `#graphql
+  query ProductFirstVariants($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        variants(first: 1) {
+          nodes {
+            id
+          }
+        }
+      }
+    }
+  }
+`;
+
+const METAFIELDS_SET_MUTATION = `#graphql
+  mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      metafields {
+        id
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+/**
+ * Whether a discount should be projected into the storefront auto-add
+ * shop metafield.
+ */
+function discountEligibleForCartAutoAddSync(discount) {
+  if (!discount.auto_add) return false;
+  if (discount.status !== "active") return false;
+  if (!(discount.get_products?.length) || !(discount.buy_products?.length)) {
+    return false;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (discount.start_date && discount.start_date > today) return false;
+
+  if (discount.has_end && discount.end_date) {
+    const end = new Date(`${discount.end_date}T23:59:59Z`);
+    if (new Date() > end) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Resolve first variant GID per product GID.
+ *
+ * @param {object} admin
+ * @param {string[]} productGids
+ * @returns {Promise<Map<string, string>>} product GID → variant GID
+ */
+async function fetchFirstVariantByProductIds(admin, productGids) {
+  const map = new Map();
+  if (!productGids.length) return map;
+
+  const res = await admin.graphql(PRODUCT_FIRST_VARIANT_QUERY, {
+    variables: { ids: productGids },
+  });
+  const { data } = await res.json();
+  for (const node of data?.nodes ?? []) {
+    if (!node?.id) continue;
+    const vid = node.variants?.nodes?.[0]?.id;
+    if (vid) map.set(node.id, vid);
+  }
+  return map;
+}
+
+/**
+ * Build JSON rules for storefront auto-add (same shape as shop metafield).
+ *
+ * @param {object} admin
+ * @param {object[]|null} discounts optional pre-fetched list
+ * @returns {Promise<object[]>}
+ */
+export async function buildCartAutoAddRules(admin, discounts = null) {
+  const list = discounts ?? (await listDiscounts(admin));
+  const eligible = list.filter(discountEligibleForCartAutoAddSync);
+
+  const firstGetProductIds = eligible
+    .map((d) => d.get_products[0]?.id)
+    .filter(Boolean);
+  const uniqueProductIds = [...new Set(firstGetProductIds)];
+  const variantByProduct = await fetchFirstVariantByProductIds(
+    admin,
+    uniqueProductIds,
+  );
+
+  const rules = [];
+  for (const d of eligible) {
+    const firstGet = d.get_products[0];
+    if (!firstGet?.id) continue;
+    const variantId = variantByProduct.get(firstGet.id);
+    if (!variantId) continue;
+    rules.push({
+      buy_qty: d.buy_qty ?? 1,
+      buy_product_ids: (d.buy_products ?? []).map((p) => p.id),
+      get_qty: d.get_qty ?? 1,
+      get_product_ids: (d.get_products ?? []).map((p) => p.id),
+      get_variant_id: variantId,
+    });
+  }
+  return rules;
+}
+
+/**
+ * Write shop metafield `$app:cart_auto_add_rules` (JSON array) for the
+ * Theme App Extension. Source of truth remains metaobjects.
+ *
+ * @param {object} admin
+ * @param {object[]|null} discounts optional pre-fetched list
+ */
+export async function syncCartAutoAddShopMetafield(admin, discounts = null) {
+  const rules = await buildCartAutoAddRules(admin, discounts);
+
+  const shopRes = await admin.graphql(SHOP_ID_QUERY);
+  const shopJson = await shopRes.json();
+  const shopId = shopJson.data?.shop?.id;
+  if (!shopId) {
+    throw new Error("Could not resolve shop id for cart auto-add sync");
+  }
+
+  const setRes = await admin.graphql(METAFIELDS_SET_MUTATION, {
+    variables: {
+      metafields: [
+        {
+          ownerId: shopId,
+          namespace: "$app",
+          key: "cart_auto_add_rules",
+          type: "json",
+          value: JSON.stringify(rules),
+        },
+      ],
+    },
+  });
+  const setData = await setRes.json();
+  const errs = setData.data?.metafieldsSet?.userErrors ?? [];
+  if (errs.length) {
+    throw new Error(errs.map((e) => e.message).join(", "));
+  }
+}
+
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 /** Return all discounts for this store, newest first. */
@@ -586,6 +742,8 @@ export async function saveDiscount(admin, discount, shopDomain = null) {
     });
   }
 
+  await syncCartAutoAddShopMetafield(admin);
+
   return getDiscount(admin, metaobjectId);
 }
 
@@ -598,6 +756,8 @@ export async function deleteDiscount(admin, id) {
   const { data } = await res.json();
   const errors = data?.metaobjectDelete?.userErrors ?? [];
   if (errors.length) throw new Error(errors.map((e) => e.message).join(", "));
+
+  await syncCartAutoAddShopMetafield(admin);
 }
 
 /**

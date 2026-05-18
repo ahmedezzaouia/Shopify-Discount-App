@@ -1,5 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
-import { getDiscount, upsertShopifyDiscountPublic } from "../data/discounts.server";
+import { getDiscount, upsertShopifyDiscountPublic, syncCartAutoAddShopMetafield } from "../data/discounts.server";
 
 /**
  * Webhook: metaobjects/update
@@ -36,6 +36,7 @@ export const action = async ({ request }) => {
     }
 
     await upsertShopifyDiscountPublic(admin, discount);
+    await syncCartAutoAddShopMetafield(admin);
     console.log(`[webhook] Synced Shopify Discount for metaobject ${gid} (shop: ${shop})`);
   } catch (err) {
     console.error(`[webhook] Failed to sync discount ${gid}:`, err);

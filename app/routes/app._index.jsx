@@ -28,6 +28,7 @@ import {
   toggleDiscountStatus,
   duplicateDiscount,
   upsertShopifyDiscountPublic,
+  syncCartAutoAddShopMetafield,
 } from "../data/discounts.server";
 import { PillTabs } from "../components/PillTabs";
 
@@ -47,7 +48,9 @@ export const loader = async ({ request }) => {
   );
 
   // Re-fetch so shopify_discount_id is populated for any newly created ones.
-  return { discounts: await listDiscounts(admin) };
+  const refreshed = await listDiscounts(admin);
+  await syncCartAutoAddShopMetafield(admin, refreshed);
+  return { discounts: refreshed };
 };
 
 export const action = async ({ request }) => {
