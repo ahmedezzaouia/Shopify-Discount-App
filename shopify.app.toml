@@ -2,7 +2,7 @@
 
 client_id = "16966a0dc4113dc067dbb3ed282002d1"
 name = "Customer-Discount"
-application_url = "https://example.com"
+application_url = "https://shopify-discount-app-5u5y.onrender.com"
 embedded = true
 
 [build]
@@ -29,11 +29,11 @@ api_version = "2026-07"
 scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_discounts,write_app_proxy"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://shopify-discount-app-5u5y.onrender.com/api/auth" ]
 
 # Storefront fetches rules at /apps/customer-discount/cart-auto-add-rules (same origin).
 [app_proxy]
-url = "https://example.com/api/proxy"
+url = "https://shopify-discount-app-5u5y.onrender.com/api/proxy"
 prefix = "apps"
 subpath = "customer-discount"
 
