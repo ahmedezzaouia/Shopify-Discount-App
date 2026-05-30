@@ -1,0 +1,21 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Set SHOPIFY_API_KEY and SHOPIFY_API_SECRET in the Render dashboard (secrets).
+services:
+  - type: web
+    name: customer-discount
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: SCOPES
+        value: write_products,write_metaobjects,write_metaobject_definitions,write_discounts,write_app_proxy
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: SHOPIFY_APP_URL
+        sync: false
