@@ -557,11 +557,10 @@ const METAFIELDS_SET_MUTATION = `#graphql
 `;
 
 /**
- * Whether a discount should be projected into the storefront auto-add
- * shop metafield.
+ * Whether a discount should be projected into the storefront rules
+ * shop metafield (auto-add and gift widget).
  */
-function discountEligibleForCartAutoAddSync(discount) {
-  if (!discount.auto_add) return false;
+function discountEligibleForStorefrontSync(discount) {
   if (discount.status !== "active") return false;
   if (!(discount.get_products?.length) || !(discount.buy_products?.length)) {
     return false;
@@ -602,7 +601,7 @@ async function fetchFirstVariantByProductIds(admin, productGids) {
 }
 
 /**
- * Build JSON rules for storefront auto-add (same shape as shop metafield).
+ * Build JSON rules for storefront cart promo (auto-add + gift widget).
  *
  * @param {object} admin
  * @param {object[]|null} discounts optional pre-fetched list
@@ -610,7 +609,7 @@ async function fetchFirstVariantByProductIds(admin, productGids) {
  */
 export async function buildCartAutoAddRules(admin, discounts = null) {
   const list = discounts ?? (await listDiscounts(admin));
-  const eligible = list.filter(discountEligibleForCartAutoAddSync);
+  const eligible = list.filter(discountEligibleForStorefrontSync);
 
   const firstGetProductIds = eligible
     .map((d) => d.get_products[0]?.id)
@@ -628,11 +627,16 @@ export async function buildCartAutoAddRules(admin, discounts = null) {
     const variantId = variantByProduct.get(firstGet.id);
     if (!variantId) continue;
     rules.push({
+      auto_add: !!d.auto_add,
+      discount_value_type: d.discount_value_type ?? "free",
+      discount_value: d.discount_value ?? 0,
       buy_qty: d.buy_qty ?? 1,
       buy_product_ids: (d.buy_products ?? []).map((p) => p.id),
       get_qty: d.get_qty ?? 1,
       get_product_ids: (d.get_products ?? []).map((p) => p.id),
       get_variant_id: variantId,
+      get_title: firstGet.title ?? "",
+      get_image_url: firstGet.imageUrl ?? null,
     });
   }
   return rules;

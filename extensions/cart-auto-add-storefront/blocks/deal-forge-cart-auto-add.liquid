@@ -29,6 +29,9 @@
 <!-- df-caa mf_p={% if df_mf != blank %}1{% else %}0{% endif %} -->
 {%- endif -%}
 
+{{ 'deal-forge-gift-widget.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'deal-forge-gift-widget.js' | asset_url }}" defer></script>
+
 {% schema %}
 {
   "name": "Deal Forge auto-add",
